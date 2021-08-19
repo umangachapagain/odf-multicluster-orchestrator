@@ -1,0 +1,739 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: benchmark-operator
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: benchmarks.ripsaw.cloudbulldozer.io
+spec:
+  group: ripsaw.cloudbulldozer.io
+  names:
+    kind: Benchmark
+    listKind: BenchmarkList
+    plural: benchmarks
+    singular: benchmark
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: The type of test to perform
+      jsonPath: .spec.workload.name
+      name: Type
+      type: string
+    - description: The state of the benchmark
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: The state of metadata collection
+      jsonPath: .status.metadata
+      name: Metadata State
+      type: string
+    - description: System metrics collect status
+      jsonPath: .status.system_metrics
+      name: System metrics
+      type: string
+    - jsonPath: .status.uuid
+      name: UUID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              cleanup:
+                type: boolean
+              clustername:
+                type: string
+              drop_cache_kernel:
+                type: boolean
+              drop_cache_rook_ceph:
+                type: boolean
+              elasticsearch:
+                default: {}
+                properties:
+                  index_name:
+                    type: string
+                  parallel:
+                    default: false
+                    type: boolean
+                  url:
+                    default: ""
+                    type: string
+                  verify_cert:
+                    default: true
+                    type: boolean
+                type: object
+              global_overrides:
+                items:
+                  type: string
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              hostpath:
+                type: string
+              job_params:
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                type: array
+              metadata:
+                default: {}
+                properties:
+                  collection:
+                    default: false
+                    type: boolean
+                  force:
+                    default: false
+                    type: boolean
+                  image:
+                    default: quay.io/cloud-bulldozer/backpack:latest
+                    type: string
+                  label:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  privileged:
+                    default: false
+                    type: boolean
+                  serviceaccount:
+                    default: default
+                    type: string
+                  ssl:
+                    default: false
+                    type: boolean
+                  stockpileSkipTags:
+                    default: []
+                    items:
+                      type: string
+                    type: array
+                  stockpileTags:
+                    default:
+                    - common
+                    - k8s
+                    - openshift
+                    items:
+                      type: string
+                    type: array
+                  targeted:
+                    default: true
+                    type: boolean
+                type: object
+              prometheus:
+                properties:
+                  es_parallel:
+                    type: boolean
+                  es_url:
+                    type: string
+                  prom_token:
+                    type: string
+                  prom_url:
+                    type: string
+                type: object
+              snappy:
+                default: {}
+                properties:
+                  password:
+                    default: ""
+                    type: string
+                  url:
+                    default: ""
+                    type: string
+                  user:
+                    default: ""
+                    type: string
+                type: object
+              system_metrics:
+                default: {}
+                properties:
+                  collection:
+                    default: false
+                    type: boolean
+                  es_url:
+                    type: string
+                  image:
+                    default: quay.io/cloud-bulldozer/kube-burner:latest
+                    type: string
+                  index_name:
+                    default: system-metrics
+                    type: string
+                  metrics_profile:
+                    default: node-metrics.yml
+                    type: string
+                  prom_token:
+                    type: string
+                  prom_url:
+                    default: https://prometheus-k8s.openshift-monitoring.svc.cluster.local:9091
+                    type: string
+                  step:
+                    default: 30s
+                    type: string
+                type: object
+              test_user:
+                type: string
+              uuid:
+                type: string
+              workload:
+                properties:
+                  args:
+                    properties:
+                      debug:
+                        default: false
+                        description: Set debug log level in the workload
+                        type: boolean
+                      job_timeout:
+                        default: 3600
+                        description: Timeout used for jobs deployed by this benchmark
+                        type: integer
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  name:
+                    description: Workload name
+                    type: string
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            type: object
+          status:
+            default: {}
+            properties:
+              complete:
+                default: false
+                description: Benchmark is completed
+                type: boolean
+              metadata:
+                description: Metadata collection status
+                type: string
+              node_hi_idx:
+                type: string
+              node_idx:
+                type: string
+              node_low_idx:
+                type: string
+              pod_hi_idx:
+                type: string
+              pod_idx:
+                type: string
+              pod_low_idx:
+                type: string
+              state:
+                description: Benchmark status
+                type: string
+              suuid:
+                description: Benchmark short UUID
+                type: string
+              system_metrics:
+                default: Not collected
+                description: System metrics collection status
+                type: string
+              uuid:
+                description: Benchmark UUID
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: benchmark-operator
+  namespace: benchmark-operator
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: benchmark-privileged
+spec:
+  allowPrivilegeEscalation: true
+  allowedCapabilities:
+  - '*'
+  fsGroup:
+    rule: RunAsAny
+  hostIPC: true
+  hostNetwork: true
+  hostPID: true
+  hostPorts:
+  - max: 65535
+    min: 0
+  privileged: true
+  runAsUser:
+    rule: RunAsAny
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  volumes:
+  - '*'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: benchmark-leader-election-role
+  namespace: benchmark-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: benchmark-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - pods
+  - pods/exec
+  - pods/log
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - daemonsets
+  - replicasets
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - daemonsets
+  - services
+  - endpoints
+  - persistentvolumeclaims
+  - virtualmachineinstances
+  - events
+  - configmaps
+  - secrets
+  - pods/log
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - daemonsets
+  - replicasets
+  - statefulsets
+  - deployments/finalizers
+  verbs:
+  - '*'
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  verbs:
+  - get
+  - create
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances
+  verbs:
+  - '*'
+- apiGroups:
+  - ripsaw.cloudbulldozer.io
+  resources:
+  - '*'
+  verbs:
+  - '*'
+- apiGroups:
+  - batch
+  - extensions
+  resources:
+  - jobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - policy
+  resourceNames:
+  - privileged
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
+- apiGroups:
+  - security.openshift.io
+  resourceNames:
+  - privileged
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - use
+- apiGroups:
+  - hyperfoil.io
+  resources:
+  - hyperfoils
+  verbs:
+  - '*'
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - network-attachment-definitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - patch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  - clusterroles
+  - clusterrolebindings
+  - daemonsets
+  verbs:
+  - '*'
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - subresources.kubevirt.io
+  resources:
+  - virtualmachineinstances/console
+  - virtualmachineinstances/vnc
+  verbs:
+  - get
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances
+  - virtualmachines
+  - virtualmachineinstancepresets
+  - virtualmachineinstancereplicasets
+  verbs:
+  - get
+  - delete
+  - create
+  - update
+  - patch
+  - list
+  - watch
+  - deletecollection
+- apiGroups:
+  - ""
+  resourceNames:
+  - kubevirt-config
+  resources:
+  - configmaps
+  verbs:
+  - update
+  - get
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - pods
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ripsaw.cloudbulldozer.io
+  resources:
+  - benchmarks
+  - benchmarks/status
+  - benchmarks/finalizers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: benchmark-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: benchmark-proxy-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: benchmark-leader-election-rolebinding
+  namespace: benchmark-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: benchmark-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: controller-manager
+  namespace: system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: benchmark-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: benchmark-manager-role
+subjects:
+- kind: ServiceAccount
+  name: benchmark-operator
+  namespace: benchmark-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: benchmark-manager-self-provisioner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: self-provisioner
+subjects:
+- kind: ServiceAccount
+  name: benchmark-operator
+  namespace: benchmark-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: benchmark-proxy-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: benchmark-proxy-role
+subjects:
+- kind: ServiceAccount
+  name: controller-manager
+  namespace: system
+---
+apiVersion: v1
+data:
+  controller_manager_config.yaml: |
+    apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
+    kind: ControllerManagerConfig
+    health:
+      healthProbeBindAddress: :6789
+    metrics:
+      bindAddress: 127.0.0.1:8080
+
+    leaderElection:
+      leaderElect: true
+      resourceName: 811c9dc5.cloudbulldozer.io
+kind: ConfigMap
+metadata:
+  name: benchmark-manager-config
+  namespace: benchmark-operator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: benchmark-controller-manager-metrics-service
+  namespace: benchmark-operator
+spec:
+  ports:
+  - name: https
+    port: 8443
+    targetPort: https
+  selector:
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: benchmark-controller-manager
+  namespace: benchmark-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --leader-elect
+        - --leader-election-id=ripsaw
+        env:
+        - name: ANSIBLE_GATHERING
+          value: explicit
+        - name: WATCH_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: OPERATOR_NAME
+          value: benchmark-operator
+        - name: MAX_CONCURRENT_RECONCILES_BENCHMARK_RIPSAW_CLOUDBULLDOZER_IO
+          value: "4"
+        - name: ANSIBLE_VERBOSITY_BENCHMARK_RIPSAW_CLOUDBULLDOZER_IO
+          value: "4"
+        image: quay.io/cloud-bulldozer/benchmark-operator:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6789
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 6789
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+      - env:
+        - name: MASTER
+          value: "true"
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
+        image: bitnami/redis:latest
+        name: redis-master
+        ports:
+        - containerPort: 6379
+        resources:
+          limits:
+            cpu: "2.0"
+          requests:
+            cpu: 100m
+        volumeMounts:
+        - mountPath: /redis-master-data
+          name: data
+      securityContext:
+        runAsNonRoot: true
+      serviceAccountName: benchmark-operator
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - emptyDir: {}
+        name: data
