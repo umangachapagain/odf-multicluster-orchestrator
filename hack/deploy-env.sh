@@ -18,7 +18,7 @@ function wait_for_ssh() {
 }
 
 function wait_for_condition() {
-    local count=61
+    local count=71
     local condition=${1}
     local result
     shift
