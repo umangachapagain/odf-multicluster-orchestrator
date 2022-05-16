@@ -80,15 +80,17 @@ function start_minikube() {
     echo ""
 
     echo "Start cluster1 ManagedCluster"
-    minikube start --driver=kvm2 --network=br10 --profile=$2
+    minikube start --driver=kvm2 --network=br10 --extra-disks=3 --profile=$2
     wait_for_ssh $2
-    attach_disk $2
+    # attach_disk $2
+    minikube ssh -p $2 "sudo rm -rf /mnt/vda1/rook/ /var/lib/rook && sudo rm -rf /mnt/vda1/rook/ && sudo mkdir /mnt/vda1/rook/ && sudo ln -sf /mnt/vda1/rook/ /var/lib/ && sudo rm -rf /var/log/ceph/rook-ceph/"
     echo ""
 
     echo "Start cluster2 ManagedCluster"
-    minikube start --driver=kvm2 --network=br10 --profile=$3
+    minikube start --driver=kvm2 --network=br10 --extra-disks=3 --profile=$3
     wait_for_ssh $3
-    attach_disk $3
+    # attach_disk $3
+    minikube ssh -p $3 "sudo rm -rf /mnt/vda1/rook/ /var/lib/rook && sudo rm -rf /mnt/vda1/rook/ && sudo mkdir /mnt/vda1/rook/ && sudo ln -sf /mnt/vda1/rook/ /var/lib/ && sudo rm -rf /var/log/ceph/rook-ceph/"
     echo ""
 }
 
