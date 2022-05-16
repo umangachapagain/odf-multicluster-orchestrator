@@ -80,16 +80,63 @@ function start_minikube() {
     echo ""
 
     echo "Start cluster1 ManagedCluster"
-    minikube start --driver=kvm2 --network=br10 --profile=$2 # --addons=[olm]
+    minikube start --driver=kvm2 --network=br10 --profile=$2
     wait_for_ssh $2
     attach_disk $2
     echo ""
 
     echo "Start cluster2 ManagedCluster"
-    minikube start --driver=kvm2 --network=br10 --profile=$3 # --addons=[olm]
+    minikube start --driver=kvm2 --network=br10 --profile=$3
     wait_for_ssh $3
     attach_disk $3
     echo ""
+}
+
+function deploy_olm() {
+    echo "Deploying OLM"
+
+    release="v0.21.2"
+    base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download"
+    url="${base_url}/${release}"
+    namespace=olm
+
+    for cl in "$@"
+    do
+        if kubectl --context $cl get deployment olm-operator -n ${namespace} > /dev/null 2>&1; then
+            echo "OLM is already installed in ${namespace} namespace. Exiting..."
+            return
+        fi
+
+        kubectl --context $cl create -f "${url}/crds.yaml"
+        kubectl --context $cl wait --for=condition=Established -f "${url}/crds.yaml"
+        kubectl --context $cl create -f "${url}/olm.yaml"
+
+        # wait for deployments to be ready
+        kubectl --context $cl rollout status -w deployment/olm-operator --namespace="${namespace}"
+        kubectl --context $cl rollout status -w deployment/catalog-operator --namespace="${namespace}"
+
+
+        retries=30
+        until [[ $retries == 0 ]]; do
+            new_csv_phase=$(kubectl --context $cl get csv -n "${namespace}" packageserver -o jsonpath='{.status.phase}' 2>/dev/null || echo "Waiting for CSV to appear")
+            if [[ $new_csv_phase != "$csv_phase" ]]; then
+                csv_phase=$new_csv_phase
+                echo "Package server phase: $csv_phase"
+            fi
+            if [[ "$new_csv_phase" == "Succeeded" ]]; then
+            break
+            fi
+            sleep 10
+            retries=$((retries - 1))
+        done
+
+        if [ $retries == 0 ]; then
+            echo "CSV \"packageserver\" failed to reach phase succeeded"
+            exit 1
+        fi
+
+        kubectl --context $cl rollout status -w deployment/packageserver --namespace="${namespace}"
+    done
 }
 
 function deploy_ocm() {
@@ -111,11 +158,6 @@ function deploy_ocm() {
 
     echo "Patch ManagedCluster (in hub)"
     # kubectl patch managedcluster cluster1 -p='{"spec":{"hubAcceptsClient":true}}' --type=merge --context=hub
-}
-
-function deploy_olm() {
-    echo "Deploy OLM"
-    operator-sdk olm install
 }
 
 function token_exchange() {
@@ -244,6 +286,7 @@ EOF
 function create() {
     setup_network
     start_minikube hub cluster1 cluster2
+    deploy_olm hub cluster1 cluster2
 
     deploy_rook cluster1 cluster2
     wait_for_condition "Ready" kubectl --context cluster1 get cephcluster my-cluster -n rook-ceph -o jsonpath={.status.phase}
