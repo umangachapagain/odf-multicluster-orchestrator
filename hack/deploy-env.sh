@@ -183,9 +183,9 @@ function deploy_rook() {
     do
         echo "Cluster:" $cl
         echo "Deploying Rook"
-        kubectl --context $cl apply -f https://raw.githubusercontent.com/rook/rook/162322ab08fcd6b68fcc0099f8671f1d14e24b80/deploy/examples/crds.yaml
-        kubectl --context $cl apply -f https://raw.githubusercontent.com/rook/rook/162322ab08fcd6b68fcc0099f8671f1d14e24b80/deploy/examples/common.yaml
-        kubectl --context $cl apply -f https://raw.githubusercontent.com/rook/rook/162322ab08fcd6b68fcc0099f8671f1d14e24b80/deploy/examples/operator.yaml
+        kubectl --context $cl apply -f https://raw.githubusercontent.com/rook/rook/492786404c768024382c9f1544b33f559f3f7173/deploy/examples/crds.yaml
+        kubectl --context $cl apply -f https://raw.githubusercontent.com/rook/rook/492786404c768024382c9f1544b33f559f3f7173/deploy/examples/common.yaml
+        kubectl --context $cl apply -f https://raw.githubusercontent.com/rook/rook/492786404c768024382c9f1544b33f559f3f7173/deploy/examples/operator.yaml
         echo "Deploying CephCluster"
         kubectl --context $cl apply -f https://raw.githubusercontent.com/RamenDR/ramen/2de057515a55ca3aa9fbf330eec56a3730b43dba/hack/dev-rook-cluster.yaml
         echo "Deploying CephBlockPool with mirroring enabled"
