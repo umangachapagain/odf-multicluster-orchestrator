@@ -285,6 +285,19 @@ EOF
     echo ""
 }
 
+function deploy_monitoring() {
+    for cl in "$@"
+    do
+        kubectl --context $cl create ns monitoring
+        kubectl --context $cl -n monitoring apply -f https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/nodeExporter-serviceAccount.yaml
+        kubectl --context $cl -n monitoring apply -f https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/nodeExporter-clusterRole.yaml
+        kubectl --context $cl -n monitoring apply -f https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/nodeExporter-clusterRoleBinding.yaml
+        kubectl --context $cl -n monitoring apply -f https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/nodeExporter-daemonset.yaml
+        kubectl --context $cl -n monitoring apply -f https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/nodeExporter-service.yaml
+        kubectl --context $cl -n monitoring apply -f https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/nodeExporter-networkPolicy.yaml
+    done
+}
+
 function create() {
     setup_network
     start_minikube hub cluster1 cluster2
@@ -308,6 +321,8 @@ function create() {
     init_default_pvc_with_mirroring cluster1
 
     deploy_benchmark_operator cluster1
+
+    deploy_monitoring cluster1 cluster2
 }
 
 function destroy() {
