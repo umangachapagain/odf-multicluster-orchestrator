@@ -20,109 +20,95 @@ limitations under the License.
 package integration_test
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 
-	ramenv1alpha1 "github.com/ramendr/ramen/api/v1alpha1"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	multiclusterv1alpha1 "github.com/red-hat-storage/odf-multicluster-orchestrator/api/v1alpha1"
-	"github.com/red-hat-storage/odf-multicluster-orchestrator/controllers"
-	"github.com/red-hat-storage/odf-multicluster-orchestrator/controllers/utils"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
-	clusterv1 "open-cluster-management.io/api/cluster/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"github.com/red-hat-storage/odf-multicluster-orchestrator/cmd"
+	"github.com/red-hat-storage/odf-multicluster-orchestrator/tests/framework"
 	//+kubebuilder:scaffold:imports
 )
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+var ctx, cancel = context.WithCancel(context.Background())
 
-func TestAPIs(t *testing.T) {
+func TestMulticlusterOrchestrator(t *testing.T) {
 	RegisterFailHandler(Fail)
 
 	RunSpecs(t, "Controller Suite")
 }
 
 var _ = BeforeSuite(func() {
-	var err error
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	slog.Info("Preparing test environment")
 
-	By("bootstrapping test environment")
-	testEnv = &envtest.Environment{
-		CRDDirectoryPaths: []string{
-			filepath.Join("../..", "config", "crd", "bases"),
-			filepath.Join("..", "testdata"),
-		},
-		ErrorIfCRDPathMissing: true,
-	}
+	slog.Info("Starting hub cluster", "name", "hub")
+	framework.NewCluster("hub").WithCRD([]string{
+		filepath.Join("../..", "config", "crd", "bases"),
+		filepath.Join("..", "testdata"),
+	}).Start()
 
-	cfg, err = testEnv.Start()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
+	hubKubeconfig := framework.CreateKubeconfigFileForRestConfig(*framework.GetCluster("hub").Config)
+	slog.Info(fmt.Sprintf("Hub kubeconfig path=%s", hubKubeconfig))
 
-	err = multiclusterv1alpha1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-	err = addonapiv1alpha1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	namespace := framework.GetNamespace("openshift-operators")
+	Expect(framework.GetCluster("hub").K8sClient.Create(ctx, &namespace)).To(BeNil())
 
-	err = clusterv1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	cluster1Namespace := framework.GetNamespace("cluster1")
+	Expect(framework.GetCluster("hub").K8sClient.Create(ctx, &cluster1Namespace)).To(BeNil())
+	slog.Info("Namespace created")
 
-	err = ramenv1alpha1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	consoleDeployment := framework.GetDeployment("odf-multicluster-console", "openshift-operators")
+	Expect(framework.GetCluster("hub").K8sClient.Create(ctx, &consoleDeployment)).To(BeNil())
+	slog.Info("Deployment created")
 
-	//+kubebuilder:scaffold:scheme
+	go func(ctx context.Context) {
+		defer GinkgoRecover()
+		os.Setenv("POD_NAMESPACE", "openshift-operators")
+		os.Setenv("TOKEN_EXCHANGE_IMAGE", "busybox")
+		_, _ = cmd.ExecuteCommandForTest(ctx, []string{
+			"manager", "--dev", "true",
+			"--kubeconfig", hubKubeconfig,
+		})
+		<-ctx.Done()
+		slog.Info("**MCO HUB CONTROLLERS STOPPED**")
+	}(ctx)
 
-	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
+	slog.Info("Starting spoke cluster", "name", "cluster1")
+	framework.NewCluster("cluster1").WithCRD([]string{
+		filepath.Join("../..", "config", "crd", "bases"),
+		filepath.Join("..", "testdata"),
+	}).Start()
 
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme: scheme.Scheme,
-		Metrics: server.Options{
-			BindAddress: ":8080", // disable metrics
-		},
-		HealthProbeBindAddress: ":8081",
-		LeaderElection:         false,
-		LeaderElectionID:       "1d19c724.odf.openshift.io",
-	})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(mgr).NotTo(BeNil())
+	cluster1Kubeconfig := framework.CreateKubeconfigFileForRestConfig(*framework.GetCluster("cluster1").Config)
+	slog.Info(fmt.Sprintf("Cluster1 kubeconfig path=%s", cluster1Kubeconfig))
 
-	fakeLogger := utils.GetLogger(utils.GetZapLogger(true))
-	err = (&controllers.MirrorPeerReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Logger: fakeLogger,
-	}).SetupWithManager(mgr)
-	Expect(err).NotTo(HaveOccurred())
+	storageNamespace := framework.GetNamespace("openshift-storage")
+	Expect(framework.GetCluster("cluster1").K8sClient.Create(ctx, &storageNamespace)).To(BeNil())
+	slog.Info("Namespace created")
 
-	err = (&controllers.MirrorPeerSecretReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Logger: fakeLogger,
-	}).SetupWithManager(mgr)
-	Expect(err).NotTo(HaveOccurred())
+	go func(ctx context.Context) {
+		defer GinkgoRecover()
+		os.Setenv("POD_NAMESPACE", "openshift-storage")
+		_, _ = cmd.ExecuteCommandForTest(ctx, []string{
+			"addons", "--dev", "true",
+			"--hub-kubeconfig", hubKubeconfig,
+			"--kubeconfig", cluster1Kubeconfig,
+			"--cluster-name", "cluster1",
+			"--odf-operator-namespace", "openshift-storage",
+			"--mode", "async"})
+		<-ctx.Done()
+		slog.Info("**CLUSTER1 CONTROLLERS STOPPED**")
+	}(ctx)
 
-	go func() {
-		err = mgr.Start(ctrl.SetupSignalHandler())
-		Expect(err).ToNot(HaveOccurred())
-	}()
-
-}, 60)
+})
 
 var _ = AfterSuite(func() {
-	By("tearing down the test environment")
-	err := testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
+	slog.Info("Destroying test environment")
+	cancel()
+	<-ctx.Done()
+	framework.StopAllClusters()
 })
