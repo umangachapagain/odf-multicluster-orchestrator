@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
 var (
@@ -54,12 +53,6 @@ func init() {
 	utilruntime.Must(viewv1beta1.AddToScheme(mgrScheme))
 	//+kubebuilder:scaffold:scheme
 }
-
-const (
-	WebhookCertDir  = "/apiserver.local.config/certificates"
-	WebhookCertName = "apiserver.crt"
-	WebhookKeyName  = "apiserver.key"
-)
 
 type ManagerOptions struct {
 	MetricsAddr             string
@@ -159,12 +152,6 @@ func (o *ManagerOptions) runManager() {
 	}
 	logger.Info("Finished garbage collection")
 
-	srv := webhook.NewServer(webhook.Options{
-		CertDir:  WebhookCertDir,
-		CertName: WebhookCertName,
-		KeyName:  WebhookKeyName,
-	})
-
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: mgrScheme,
 		Metrics: server.Options{
@@ -173,7 +160,6 @@ func (o *ManagerOptions) runManager() {
 		HealthProbeBindAddress: o.ProbeAddr,
 		LeaderElection:         o.EnableLeaderElection,
 		LeaderElectionID:       "1d19c724.odf.openshift.io",
-		WebhookServer:          srv,
 	})
 	if err != nil {
 		logger.Error("Failed to start manager", "error", err)
@@ -263,13 +249,6 @@ func (o *ManagerOptions) runManager() {
 			Recorder:   teEventRecorder,
 			AgentImage: agentImage,
 			AddonName:  setup.TokenExchangeName},
-	}
-
-	err = (&multiclusterv1alpha1.MirrorPeer{}).SetupWebhookWithManager(mgr)
-
-	if err != nil {
-		logger.Error("Unable to create MirrorPeer webhook", "error", err)
-		os.Exit(1)
 	}
 
 	logger.Info("Creating addon manager")
